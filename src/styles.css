@@ -1,0 +1,244 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  --color-bg: #0c0c0d;
+  --color-surface: #141414;
+  --color-surface-2: #1c1c1e;
+  --color-fg: #f3f1ec;
+  --color-muted: #8f8b84;
+  --color-faint: #6a6660;
+  --color-primary: #c9cdd4;
+  --color-primary-fg: #0c0c0d;
+  --color-border: #2c2c2e;
+  --color-ring: #c9cdd4;
+  --color-card: #141414;
+  --color-card-foreground: #f3f1ec;
+  --color-destructive: #c45c4a;
+  --color-success: #8aa384;
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius: 12px;
+
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-border-hover: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  --shadow-lift: 0 18px 40px -24px rgba(0, 0, 0, 0.7);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    font-family: var(--font-display);
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  img {
+    outline: 1px solid rgba(255, 255, 255, 0.08);
+    outline-offset: -1px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+    color: var(--color-fg);
+  }
+}
+
+@utility font-display {
+  font-family: var(--font-display);
+}
+
+.loupe-ring {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 0 0 10px rgba(255, 255, 255, 0.03),
+    0 24px 60px -28px rgba(0, 0, 0, 0.85);
+}
+
+.coin-metal-gold {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #f4e4b8 0%,
+    #c4a46a 38%,
+    #7a5a28 72%,
+    #d7c08a 100%
+  );
+}
+
+.coin-metal-silver {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #f5f5f2 0%,
+    #c5c8cc 40%,
+    #6d7076 76%,
+    #dfe2e6 100%
+  );
+}
+
+.coin-metal-copper {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #f0c09a 0%,
+    #b8734a 42%,
+    #6a3a22 78%,
+    #d4a07a 100%
+  );
+}
+
+.coin-metal-nickel {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #eceae0 0%,
+    #b0aea4 42%,
+    #5c5a54 78%,
+    #d0cec4 100%
+  );
+}
+
+.coin-metal-steel {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #e8eaee 0%,
+    #9aa0a8 42%,
+    #4c5158 78%,
+    #c5c9ce 100%
+  );
+}
+
+.coin-metal-bronze {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #e2c08a 0%,
+    #a06a38 42%,
+    #5a3418 78%,
+    #c49258 100%
+  );
+}
+
+.coin-metal-clad,
+.coin-metal-billon {
+  background: radial-gradient(
+    circle at 32% 28%,
+    #f0eee6 0%,
+    #b8b6ac 42%,
+    #5e5c56 78%,
+    #d4d2c8 100%
+  );
+}
+
+.scan-sweep {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in oklab, var(--color-primary) 22%, transparent) 50%,
+    transparent 100%
+  );
+  animation: scan-sweep 2.2s var(--ease-out) infinite;
+}
+
+@keyframes scan-sweep {
+  from {
+    transform: translateY(-120%);
+  }
+  to {
+    transform: translateY(120%);
+  }
+}
+
+@keyframes loupe-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.04);
+  }
+}
+
+.loupe-pulse {
+  animation: loupe-pulse 1.8s ease-in-out infinite;
+}
+
+.stagger-in > * {
+  animation: rise-in 420ms var(--ease-out) both;
+}
+.stagger-in > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.stagger-in > *:nth-child(2) {
+  animation-delay: 50ms;
+}
+.stagger-in > *:nth-child(3) {
+  animation-delay: 100ms;
+}
+.stagger-in > *:nth-child(4) {
+  animation-delay: 150ms;
+}
+.stagger-in > *:nth-child(5) {
+  animation-delay: 200ms;
+}
+.stagger-in > *:nth-child(6) {
+  animation-delay: 250ms;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-sweep,
+  .loupe-pulse,
+  .stagger-in > * {
+    animation: none !important;
+  }
+}

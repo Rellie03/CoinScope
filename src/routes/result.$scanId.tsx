@@ -5,10 +5,18 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { CoinFace } from "@/components/coin/coin-face";
 import { DualPanel } from "@/components/coin/dual-panel";
-import { ValueBar } from "@/components/coin/value-bar";
+import { ValueBar, ErrorValueBar } from "@/components/coin/value-bar";
 import { DISCLAIMER_NOTE } from "@/lib/coins/catalog";
 import { useCabinetStore } from "@/lib/coins/store";
-import { GRADE_OPTIONS, RARITY_LABEL, METAL_LABEL, valueAtGrade, type GradeKey } from "@/lib/coins/types";
+import {
+  ERROR_LABEL,
+  GRADE_OPTIONS,
+  RARITY_LABEL,
+  METAL_LABEL,
+  scaleValues,
+  valueAtGrade,
+  type GradeKey,
+} from "@/lib/coins/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/result/$scanId")({ component: ResultPage });
@@ -25,6 +33,29 @@ function ResultPage() {
   const values = useMemo(() => {
     if (!scan) return null;
     return valueAtGrade(scan.identification, scan.grade);
+  }, [scan]);
+
+  // Same-type value WITH the error, in the same grade — only when Fault
+  // returned a complete range. Otherwise the block stays hidden.
+  const errorValues = useMemo(() => {
+    if (!scan) return null;
+    const f = scan.fault;
+    if (
+      !f.hasError ||
+      f.errorValueLow == null ||
+      f.errorValueMid == null ||
+      f.errorValueHigh == null
+    ) {
+      return null;
+    }
+    return scaleValues(
+      f.errorValueLow,
+      f.errorValueMid,
+      f.errorValueHigh,
+      scan.identification.meltValue,
+      scan.identification.gradeEstimate,
+      scan.grade,
+    );
   }, [scan]);
 
   if (!hydrated) {
@@ -100,6 +131,14 @@ function ResultPage() {
             high={values.high}
             melt={ident.meltValue}
           />
+          {errorValues ? (
+            <ErrorValueBar
+              low={errorValues.low}
+              mid={errorValues.mid}
+              high={errorValues.high}
+              errorLabel={ERROR_LABEL[scan.fault.category]}
+            />
+          ) : null}
           <Button className="w-full sm:w-auto" onClick={onCabinet} variant={inCabinet ? "secondary" : "default"}>
             {inCabinet ? (
               <>

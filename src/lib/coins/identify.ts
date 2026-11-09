@@ -112,6 +112,8 @@ Do NOT call these mint errors:
 
 Authenticity: note casts, transferred surfaces, added mintmarks, or too-good-to-be-true doubling.
 
+Values: errorValueLow/Mid/High are a USD retail range for this same type, in a similar grade, WITH this error — what the piece could be worth if the error is genuine and confirmed. Use null for all three when hasError is false, or when you genuinely cannot estimate a range. Same discipline as Lens: realistic retail ranges, no invented six-figure prices for worn common dates, not an appraisal.
+
 Return JSON only:
 {
   "hasError": boolean,
@@ -122,7 +124,10 @@ Return JSON only:
   "tells": string[],
   "authenticityRisk": "low"|"medium"|"high",
   "authenticityNote": string,
-  "valueImpact": string
+  "valueImpact": string,
+  "errorValueLow": number|null,
+  "errorValueMid": number|null,
+  "errorValueHigh": number|null
 }`;
 
 export type DualResult =
@@ -147,6 +152,10 @@ function asRisk(v: unknown): ErrorFinding["authenticityRisk"] {
 function num(v: unknown, fallback = 0) {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 function str(v: unknown, fallback = "") {
   return typeof v === "string" ? v : fallback;
@@ -222,6 +231,26 @@ function normalizeIdent(raw: Record<string, unknown>): Identification {
 function normalizeFault(raw: Record<string, unknown>): ErrorFinding {
   const hasError = Boolean(raw.hasError);
   const category = hasError ? asError(raw.category) : "none";
+  // Error values only exist when an error was actually found, and only as a
+  // complete low-mid-high range — a partial range is dropped, not shown.
+  let errorValueLow = hasError ? numOrNull(raw.errorValueLow) : null;
+  let errorValueMid = hasError ? numOrNull(raw.errorValueMid) : null;
+  let errorValueHigh = hasError ? numOrNull(raw.errorValueHigh) : null;
+  if (errorValueLow != null && errorValueHigh != null && errorValueHigh < errorValueLow) {
+    const t = errorValueLow;
+    errorValueLow = errorValueHigh;
+    errorValueHigh = t;
+  }
+  if (
+    errorValueLow != null &&
+    errorValueMid != null &&
+    errorValueHigh != null &&
+    (errorValueMid < errorValueLow || errorValueMid > errorValueHigh)
+  ) {
+    errorValueMid = (errorValueLow + errorValueHigh) / 2;
+  }
+  const complete =
+    errorValueLow != null && errorValueMid != null && errorValueHigh != null;
   return {
     available: true,
     hasError,
@@ -235,6 +264,9 @@ function normalizeFault(raw: Record<string, unknown>): ErrorFinding {
     authenticityRisk: asRisk(raw.authenticityRisk),
     authenticityNote: str(raw.authenticityNote),
     valueImpact: str(raw.valueImpact),
+    ...(complete
+      ? { errorValueLow, errorValueMid, errorValueHigh }
+      : { errorValueLow: null, errorValueMid: null, errorValueHigh: null }),
   };
 }
 

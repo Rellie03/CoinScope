@@ -23,12 +23,13 @@ export function LoupeCamera({
   const kindRef = useRef<Kind>("coin");
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  kindRef.current = kind;
   const shots = useRef<{ obverse?: string; reverse?: string }>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const guideRef = useRef<HTMLDivElement>(null);
 
   const [kind, setKind] = useState<Kind>("coin");
+  kindRef.current = kind;
   const [side, setSide] = useState<Side>("obverse");
   const [hint, setHint] = useState("Starting the camera…");
   const [progress, setProgress] = useState(0);
@@ -153,9 +154,51 @@ export function LoupeCamera({
     if (lock.current) return;
     const video = videoRef.current;
     if (!video || video.readyState < 2 || !video.videoWidth) return;
+    const url = captureFrame();
+    if (!url) return;
     lock.current = true;
-    advance(frameToJpeg(video));
+    advance(url);
   };
+
+  // Crop the capture to the region actually visible inside the ring/frame
+  // guide. The preview uses object-fit: cover, so a full-frame capture makes
+  // the coin come out much smaller than it looked inside the ring.
+  function captureFrame() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return "";
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const vr = video.getBoundingClientRect();
+    const gr = guideRef.current?.getBoundingClientRect();
+    let sx = 0;
+    let sy = 0;
+    let sw = vw;
+    let sh = vh;
+    if (gr && vr.width > 0 && vr.height > 0) {
+      const scale = Math.max(vr.width / vw, vr.height / vh);
+      const dispW = vw * scale;
+      const dispH = vh * scale;
+      const offX = (dispW - vr.width) / 2;
+      const offY = (dispH - vr.height) / 2;
+      sx = (gr.left - vr.left + offX) / scale;
+      sy = (gr.top - vr.top + offY) / scale;
+      sw = gr.width / scale;
+      sh = gr.height / scale;
+      sx = Math.max(0, Math.min(vw - 1, sx));
+      sy = Math.max(0, Math.min(vh - 1, sy));
+      sw = Math.max(1, Math.min(vw - sx, sw));
+      sh = Math.max(1, Math.min(vh - sy, sh));
+    }
+    const max = 768;
+    const outScale = Math.min(1, max / Math.max(sw, sh));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(sw * outScale));
+    canvas.height = Math.max(1, Math.round(sh * outScale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.78);
+  }
 
   function take() {
     takeRef.current();
@@ -206,6 +249,7 @@ export function LoupeCamera({
       />
       <canvas ref={sampleRef} className="hidden" />
       <div
+        ref={guideRef}
         className={cn(
           "pointer-events-none absolute left-1/2 top-[46%] -translate-x-1/2 -translate-y-1/2",
           ring ? "size-[min(78vw,22rem)]" : "h-[min(52vw,15rem)] w-[min(88vw,26rem)]",
@@ -360,14 +404,4 @@ function sampleCenter(
   return { luma, detail: detail / n, motion: prev ? motion / n : 99, gray };
 }
 
-function frameToJpeg(video: HTMLVideoElement) {
-  const max = 768;
-  const scale = Math.min(1, max / Math.max(video.videoWidth, video.videoHeight));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
-  canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.78);
-}
+

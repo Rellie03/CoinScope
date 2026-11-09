@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ImagePlus, Loader2, Scan } from "lucide-react";
+import { Camera, ImagePlus, Loader2, Scan } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CoinFace } from "@/components/coin/coin-face";
+import { LoupeCamera } from "@/components/coin/loupe-camera";
 import { CATALOG_BY_ID } from "@/lib/coins/catalog";
 import { dualFromCatalog, makeScan, SAMPLE_IDS } from "@/lib/coins/dual";
 import { fileToDataUrl } from "@/lib/coins/image";
@@ -30,6 +31,7 @@ function Home() {
   const [reverse, setReverse] = useState<string | null>(null);
   const [busy, setBusy] = useState<"photo" | "describe" | null>(null);
   const [status, setStatus] = useState(SCAN_COPY[0]);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [describeOpen, setDescribeOpen] = useState(false);
   const [country, setCountry] = useState("");
   const [year, setYear] = useState("");
@@ -56,8 +58,10 @@ function Home() {
     void navigate({ to: "/result/$scanId", params: { scanId } });
   }
 
-  async function runPhoto() {
-    if (!obverse) {
+  async function runPhoto(shots?: { obverse: string; reverse?: string }) {
+    const obv = shots ? shots.obverse : obverse;
+    const rev = shots ? shots.reverse : (reverse ?? undefined);
+    if (!obv) {
       toast.error("Add an obverse photo first.");
       return;
     }
@@ -67,7 +71,7 @@ function Home() {
     }, 1400);
     try {
       const res = await identifyFromImages({
-        data: { obverse, reverse: reverse ?? undefined },
+        data: { obverse: obv, reverse: rev },
       });
       if (!res.ok) {
         toast.error(res.error);
@@ -77,8 +81,8 @@ function Home() {
         source: "photo",
         identification: res.identification,
         fault: res.fault,
-        obverseUrl: obverse,
-        reverseUrl: reverse ?? undefined,
+        obverseUrl: obv,
+        reverseUrl: rev,
       });
       rememberScan(scan);
       go(scan.id);
@@ -88,6 +92,15 @@ function Home() {
       window.clearInterval(tick);
       setBusy(null);
     }
+  }
+
+  // Camera flow: shots come back complete, so the reading runs on its own —
+  // no extra tap on "Identify".
+  function onCameraComplete(shots: { obverse: string; reverse?: string }) {
+    setCameraOpen(false);
+    setObverse(shots.obverse);
+    setReverse(shots.reverse ?? null);
+    void runPhoto(shots);
   }
 
   async function runDescribe(e: FormEvent) {
@@ -137,8 +150,10 @@ function Home() {
           See what you hold
         </h1>
         <p className="text-sm leading-relaxed text-muted">
-          Lens names the coin. Fault hunts doubled dies, off-metal strikes, clips, and the rest —
-          and will say when damage is just damage.
+          Point the camera at the coin — it snaps when the coin is steady in the
+          ring, flips to the reverse, then the reading comes up on its own. Lens
+          names the coin. Fault hunts doubled dies, off-metal strikes, clips, and
+          the rest — and will say when damage is just damage.
         </p>
       </header>
 
@@ -146,9 +161,9 @@ function Home() {
         <div className="relative w-[min(100%,20rem)]">
           <button
             type="button"
-            onClick={() => obverseRef.current?.click()}
+            onClick={() => setCameraOpen(true)}
             className="block w-full rounded-full"
-            aria-label="Upload obverse photograph"
+            aria-label="Open the camera to scan a coin"
           >
             <div
               className={cn(
@@ -160,8 +175,9 @@ function Home() {
                 <img src={obverse} alt="Obverse preview" className="size-full object-cover" />
               ) : (
                 <div className="flex size-full flex-col items-center justify-center gap-2 text-muted">
-                  <ImagePlus className="size-7" strokeWidth={1.4} />
-                  <span className="text-xs uppercase tracking-wider">Obverse</span>
+                  <Camera className="size-7" strokeWidth={1.4} />
+                  <span className="text-xs uppercase tracking-wider">Tap to scan</span>
+                  <span className="text-[11px]">Camera snaps when steady</span>
                 </div>
               )}
               {busy === "photo" ? (
@@ -171,14 +187,6 @@ function Home() {
               ) : null}
             </div>
           </button>
-          <input
-            ref={obverseRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            onChange={(e) => void onFile(e.target.files?.[0], setObverse)}
-          />
         </div>
 
         <div className="flex w-full items-center justify-center gap-3">
@@ -186,7 +194,7 @@ function Home() {
             type="button"
             onClick={() => reverseRef.current?.click()}
             className="flex size-16 overflow-hidden rounded-full bg-surface shadow-[var(--shadow-border)]"
-            aria-label="Upload reverse photograph"
+            aria-label="Upload reverse photograph from library"
           >
             {reverse ? (
               <img src={reverse} alt="Reverse preview" className="size-full object-cover" />
@@ -195,10 +203,16 @@ function Home() {
             )}
           </button>
           <input
+            ref={obverseRef}
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            onChange={(e) => void onFile(e.target.files?.[0], setObverse)}
+          />
+          <input
             ref={reverseRef}
             type="file"
             accept="image/*"
-            capture="environment"
             className="sr-only"
             onChange={(e) => void onFile(e.target.files?.[0], setReverse)}
           />
@@ -211,6 +225,14 @@ function Home() {
           {busy === "photo" ? <Loader2 className="animate-spin" /> : <Scan />}
           {busy === "photo" ? status : "Identify with dual AI"}
         </Button>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 text-sm text-muted underline-offset-4 hover:text-fg hover:underline"
+          onClick={() => obverseRef.current?.click()}
+        >
+          <ImagePlus className="size-4" />
+          Upload photos from your library instead
+        </button>
         <button
           type="button"
           className="text-sm text-muted underline-offset-4 hover:text-fg hover:underline"
@@ -269,6 +291,10 @@ function Home() {
           })}
         </div>
       </section>
+
+      {cameraOpen ? (
+        <LoupeCamera onClose={() => setCameraOpen(false)} onComplete={onCameraComplete} />
+      ) : null}
     </div>
   );
 }

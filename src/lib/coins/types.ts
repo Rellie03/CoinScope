@@ -91,6 +91,12 @@ export type ErrorFinding = {
   authenticityRisk: "low" | "medium" | "high";
   authenticityNote: string;
   valueImpact: string;
+  // USD retail range for this same type WITH this error, in a similar grade.
+  // Absent (or null) when Fault could not estimate one — the error-value
+  // block is hidden then. Never invented: these only ever come from the model.
+  errorValueLow?: number | null;
+  errorValueMid?: number | null;
+  errorValueHigh?: number | null;
 };
 
 export type CatalogCoin = Identification & {
@@ -139,23 +145,41 @@ export const GRADE_OPTIONS: { key: GradeKey; label: string; multiplier: number }
     { key: "MS-65", label: "Gem 65", multiplier: 4.1 },
   ];
 
+export function scaleValues(
+  low: number,
+  mid: number,
+  high: number,
+  melt: number | null,
+  fromGrade: GradeKey,
+  toGrade: GradeKey,
+): { low: number; mid: number; high: number } {
+  const base = GRADE_OPTIONS.find((g) => g.key === fromGrade)?.multiplier ?? 1;
+  const next = GRADE_OPTIONS.find((g) => g.key === toGrade)?.multiplier ?? 1;
+  const ratio = next / base;
+  const m = melt ?? 0;
+  const scale = (n: number) => {
+    const premium = Math.max(0, n - m);
+    return Math.round((m + premium * ratio) * 100) / 100;
+  };
+  return {
+    low: scale(low),
+    mid: scale(mid),
+    high: scale(high),
+  };
+}
+
 export function valueAtGrade(
   ident: Identification,
   grade: GradeKey,
 ): { low: number; mid: number; high: number } {
-  const base = GRADE_OPTIONS.find((g) => g.key === ident.gradeEstimate)?.multiplier ?? 1;
-  const next = GRADE_OPTIONS.find((g) => g.key === grade)?.multiplier ?? 1;
-  const ratio = next / base;
-  const melt = ident.meltValue ?? 0;
-  const scale = (n: number) => {
-    const premium = Math.max(0, n - melt);
-    return Math.round((melt + premium * ratio) * 100) / 100;
-  };
-  return {
-    low: scale(ident.estimatedValueLow),
-    mid: scale(ident.estimatedValueMid),
-    high: scale(ident.estimatedValueHigh),
-  };
+  return scaleValues(
+    ident.estimatedValueLow,
+    ident.estimatedValueMid,
+    ident.estimatedValueHigh,
+    ident.meltValue,
+    ident.gradeEstimate,
+    grade,
+  );
 }
 
 export const RARITY_LABEL: Record<Rarity, string> = {

@@ -96,3 +96,16 @@ export const useCabinetStore = create<State>()(
     },
   ),
 );
+
+// Safety net: rehydration must never gate the UI forever. If the persisted
+// state fails to load (blocked storage, corrupt entry), the result page
+// would otherwise sit on "Loading the reading…" indefinitely — the sample
+// flow hit exactly that on 2026-11-13. After 2.5s, unblock regardless;
+// a later successful rehydration just sets the same flag again.
+if (typeof window !== "undefined") {
+  window.setTimeout(() => {
+    if (!useCabinetStore.getState().hydrated) {
+      useCabinetStore.setState({ hydrated: true });
+    }
+  }, 2500);
+}

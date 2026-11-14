@@ -290,45 +290,112 @@ function parseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-async function callGrok(
+function dataUrlToGeminiPart(dataUrl: string) {
+  const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+  if (!match) throw new Error("Invalid image data URL");
+  return { inlineData: { mimeType: match[1], data: match[2] } };
+}
+
+/* A response means the model name is dead/retired (vs. a key, quota, or
+   request problem, which must NOT trigger a failover). */
+function isRetiredModelError(status: number, bodyText: string) {
+  if (status !== 400 && status !== 404) return false;
+  return /not\s*found|invalid[\s_-]*model|unknown[\s_-]*model|not\s*supported|does\s*not\s*exist/i.test(
+    bodyText || "",
+  );
+}
+
+/* The photo/describe callers build OpenAI-style content; translate it to
+   Gemini parts. Text stays text; image URLs become inlineData parts. */
+function toGeminiParts(userContent: unknown): unknown[] {
+  if (typeof userContent === "string") return [{ text: userContent }];
+  if (Array.isArray(userContent)) {
+    return userContent.map((entry) => {
+      const e = (entry ?? {}) as Record<string, unknown>;
+      if (e.type === "image_url") {
+        const url = ((e.image_url ?? {}) as Record<string, unknown>).url;
+        return dataUrlToGeminiPart(String(url));
+      }
+      return { text: String(e.text ?? "") };
+    });
+  }
+  return [{ text: String(userContent ?? "") }];
+}
+
+async function callGeminiOnce(
+  model: string,
+  apiKey: string,
   system: string,
   userContent: unknown,
   maxTokens: number,
 ): Promise<{ ok: true; json: Record<string, unknown> } | { ok: false; error: string }> {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: "AI is unavailable right now. Browse the catalog or try a sample strike." };
-  }
-
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "grok-4.5",
-      temperature: 0.2,
-      max_tokens: maxTokens,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userContent },
-      ],
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: toGeminiParts(userContent) }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+      },
     }),
   });
 
-  if (!res.ok) return { ok: false, error: `xAI API error ${res.status}` };
+  if (!res.ok) {
+    const text = await res.text();
+    const err = new Error(`Gemini API error ${res.status}: ${text.slice(0, 200)}`) as Error & {
+      status: number;
+      retiredModel: boolean;
+    };
+    err.status = res.status;
+    err.retiredModel = isRetiredModelError(res.status, text);
+    throw err;
+  }
+
   const body = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
   };
-  const parsed = parseJson(body.choices?.[0]?.message?.content ?? "");
+  const text = (body.candidates?.[0]?.content?.parts ?? [])
+    .map((p) => p.text ?? "")
+    .join("");
+  const parsed = parseJson(text);
   if (!parsed) return { ok: false, error: "Unreadable model output" };
   return { ok: true, json: parsed };
 }
 
+/* Automatic model failover: try the primary model; if Google reports the
+   name as retired/invalid, retry ONCE against the pinned fallback. Any
+   other error (bad key, quota, malformed request) returns immediately. */
+async function callGemini(
+  system: string,
+  userContent: unknown,
+  maxTokens: number,
+): Promise<{ ok: true; json: Record<string, unknown> } | { ok: false; error: string }> {
+  const apiKey = process.env.AI_API_KEY;
+  if (!apiKey) {
+    return { ok: false, error: "AI is unavailable right now. Browse the catalog or try a sample strike." };
+  }
+  const primary = process.env.AI_MODEL || "gemini-3.5-flash-lite";
+  const fallback = process.env.AI_FALLBACK_MODEL || "gemini-flash-lite-latest";
+  const candidates = primary === fallback ? [primary] : [primary, fallback];
+  let lastStatus = 0;
+  for (const model of candidates) {
+    try {
+      return await callGeminiOnce(model, apiKey, system, userContent, maxTokens);
+    } catch (err) {
+      const e = err as { status: number; retiredModel: boolean };
+      lastStatus = e.status;
+      if (!e.retiredModel) return { ok: false, error: `Gemini API error ${e.status}` };
+    }
+  }
+  return { ok: false, error: `Gemini API error ${lastStatus}` };
+}
+
 async function runDual(userContent: unknown): Promise<DualResult> {
-  if (!process.env.XAI_API_KEY) {
+  if (!process.env.AI_API_KEY) {
     return { ok: false, error: "AI is unavailable right now. Browse the catalog or try a sample strike." };
   }
   if (!rateLimit()) {
@@ -336,8 +403,8 @@ async function runDual(userContent: unknown): Promise<DualResult> {
   }
 
   const [lens, fault] = await Promise.all([
-    callGrok(LENS_SYSTEM, userContent, 900),
-    callGrok(FAULT_SYSTEM, userContent, 650),
+    callGemini(LENS_SYSTEM, userContent, 900),
+    callGemini(FAULT_SYSTEM, userContent, 650),
   ]);
 
   if (!lens.ok) {

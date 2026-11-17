@@ -35,7 +35,6 @@ export function LoupeCamera({
   const [progress, setProgress] = useState(0);
   const [ready, setReady] = useState(false);
   const [torch, setTorch] = useState(false);
-  const [torchOk, setTorchOk] = useState(false);
   const [blocked, setBlocked] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
 
@@ -53,8 +52,8 @@ export function LoupeCamera({
           audio: false,
           video: {
             facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 1280 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
         });
         if (dead) {
@@ -66,11 +65,11 @@ export function LoupeCamera({
         if (video) {
           video.srcObject = stream;
           await video.play();
+          // The 1920 request is only an "ideal" — some phones open at
+          // 640x480 and the capture comes out soft. If the real stream is
+          // low-res, ask for high resolution explicitly and re-check.
+          await ensureHighRes(video);
         }
-        const caps = stream.getVideoTracks()[0]?.getCapabilities?.() as
-          | { torch?: boolean }
-          | undefined;
-        setTorchOk(Boolean(caps?.torch));
         setHint(sideRef.current === "obverse" ? "Center the obverse" : "Center the reverse");
         timer = window.setInterval(tick, 160);
       } catch (err) {
@@ -189,7 +188,11 @@ export function LoupeCamera({
       sw = Math.max(1, Math.min(vw - sx, sw));
       sh = Math.max(1, Math.min(vh - sy, sh));
     }
-    const max = 768;
+    // Full clarity: capture at up to 1600px on the long side at high JPEG
+    // quality (was 768px / 0.78 — the main reason shots looked soft).
+    // The identify API rejects image strings over 1.6MB, so step the
+    // quality down only if the encoded shot would exceed that.
+    const max = 1600;
     const outScale = Math.min(1, max / Math.max(sw, sh));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(sw * outScale));
@@ -197,7 +200,7 @@ export function LoupeCamera({
     const ctx = canvas.getContext("2d");
     if (!ctx) return "";
     ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.78);
+    return encodeUnderLimit(canvas, 0.9);
   }
 
   function take() {
@@ -226,13 +229,47 @@ export function LoupeCamera({
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
     const next = !torch;
+    // Try the advanced form, then the plain form, then re-acquire the
+    // stream with torch requested up front (the Samsung workaround).
+    // Never gate on getCapabilities().torch — it often omits torch even
+    // when the LED works, which left the flash button dead on some phones.
     try {
       await track.applyConstraints({
         advanced: [{ torch: next } as MediaTrackConstraintSet],
       });
       setTorch(next);
+      return;
     } catch {
-      setTorchOk(false);
+      /* fall through */
+    }
+    try {
+      await track.applyConstraints({ torch: next } as MediaTrackConstraintSet);
+      setTorch(next);
+      return;
+    } catch {
+      /* fall through */
+    }
+    try {
+      const old = streamRef.current;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          torch: next,
+        } as MediaTrackConstraints,
+      });
+      old?.getTracks().forEach((t) => t.stop());
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = stream;
+        await video.play();
+      }
+      setTorch(next);
+    } catch {
+      setHint("Flash is not available on this camera");
     }
   }
 
@@ -311,8 +348,7 @@ export function LoupeCamera({
         <button
           type="button"
           onClick={() => void toggleTorch()}
-          disabled={!torchOk}
-          className="flex size-11 items-center justify-center rounded-full bg-black/50 text-fg disabled:opacity-40"
+          className="flex size-11 items-center justify-center rounded-full bg-black/50 text-fg"
           aria-label={torch ? "Turn flash off" : "Turn flash on"}
         >
           {torch ? <Zap className="size-5" /> : <ZapOff className="size-5" />}
@@ -362,6 +398,43 @@ export function LoupeCamera({
     </div>,
     document.body,
   );
+}
+
+// Encode a canvas as JPEG, stepping quality down only if the data URL
+// would exceed the identify API's 1.6MB image-string limit.
+function encodeUnderLimit(canvas: HTMLCanvasElement, quality: number): string {
+  let q = quality;
+  let url = canvas.toDataURL("image/jpeg", q);
+  while (url.length > 1_500_000 && q > 0.6) {
+    q = Math.max(0.6, q - 0.08);
+    url = canvas.toDataURL("image/jpeg", q);
+  }
+  return url;
+}
+
+// If the camera opened at low resolution (some phones settle at 640x480
+// despite an "ideal" 1920 request), ask for high resolution explicitly
+// and verify it actually moved, retrying with exact constraints.
+async function ensureHighRes(video: HTMLVideoElement) {
+  try {
+    const track = (video.srcObject as MediaStream | null)?.getVideoTracks()[0];
+    if (!track || !video.videoWidth || video.videoWidth >= 1280) return;
+    await track
+      .applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1080 } })
+      .catch(() => {});
+    await new Promise((r) => window.setTimeout(r, 700));
+    if (video.videoWidth && video.videoWidth < 1280) {
+      await track
+        .applyConstraints({ width: { exact: 1920 }, height: { exact: 1080 } })
+        .catch(async () => {
+          await track
+            .applyConstraints({ width: { exact: 1280 }, height: { exact: 720 } })
+            .catch(() => {});
+        });
+    }
+  } catch {
+    /* keep the stream we have */
+  }
 }
 
 function sampleCenter(
